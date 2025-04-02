@@ -6,6 +6,7 @@ using PatientService.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using MimeKit;
 
 namespace PatientService.Service
 {
@@ -13,12 +14,13 @@ namespace PatientService.Service
     {
         private readonly PatientDbContext _context;
         private readonly IConfiguration _configuration;
+        private readonly EmailConfiguration _emailConfig;
 
-
-        public PatientService(PatientDbContext context, IConfiguration configuration)
+        public PatientService(PatientDbContext context, IConfiguration configuration, EmailConfiguration emailConfig)
         {
             _context = context;
             _configuration = configuration;
+            _emailConfig = emailConfig;
         }
 
 
@@ -29,7 +31,7 @@ namespace PatientService.Service
 
             var patient = new Patient
             {
-                Id = Guid.NewGuid(),
+                
                 FirstName = dto.FirstName,
                 LastName = dto.LastName,
                 Email = dto.Email,
@@ -41,7 +43,8 @@ namespace PatientService.Service
             await _context.Patients.AddAsync(patient);
             await _context.SaveChangesAsync();
 
-            
+            var message = new Message(new String[] { patient.Email! }, "Registration Done successfully", $"Your Registration has been completed , here is your username and password, UserName: {patient.Username}, Password:{dto.Password}");
+            sendEmail(message);
 
             return new AuthResponse
             {
@@ -88,6 +91,49 @@ namespace PatientService.Service
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
+
+        public void sendEmail(Message message)
+        {
+            var emailMessage = CreateEmailMessage(message);
+            Send(emailMessage);
+        }
+
+        private MimeMessage CreateEmailMessage(Message message)
+        {
+            var emailMessage = new MimeMessage();
+            emailMessage.From.Add(new MailboxAddress("email", _emailConfig.From));
+            emailMessage.To.AddRange(message.To);
+            emailMessage.Subject = message.Subject;
+            emailMessage.Body = new TextPart(MimeKit.Text.TextFormat.Text) { Text = message.Content };
+
+            return emailMessage;
+
+        }
+
+
+        public void Send(MimeMessage mailMessage)
+        {
+            using var client = new MailKit.Net.Smtp.SmtpClient();
+            try
+            {
+                client.Connect(_emailConfig.SmtpServer, _emailConfig.Port, true);
+                client.AuthenticationMechanisms.Remove("XOAUTH2");
+                client.Authenticate(_emailConfig.UserName, _emailConfig.Password);
+
+                client.Send(mailMessage);
+            }
+            catch
+            {
+                throw;
+            }
+            finally
+            {
+                client.Disconnect(true);
+                client.Dispose();
+
+            }
+        }
+
 
 
 
